@@ -1,0 +1,6 @@
+{
+  "name": "Mamah Hemat Catering",
+  "description": "A luxury mobile catering booking application for Mamah Hemat, featuring custom calendar schedules, elegant catalog selection, and dynamic QRIS payment integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
