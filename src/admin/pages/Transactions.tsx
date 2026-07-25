@@ -1,16 +1,43 @@
-import { useState, useEffect, useCallback } from 'react';
-import { CreditCard, TrendingUp, Clock, CheckCircle2, XCircle, RefreshCw, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { CreditCard, TrendingUp, Clock, CheckCircle2, XCircle, RefreshCw, AlertCircle, Calendar, X } from 'lucide-react';
 import {
   Transaction, PaymentStatus,
   PAYMENT_STATUS_CONFIG, PAYMENT_METHOD_LABELS,
   formatIDR, formatDateTime
 } from '../data';
 
+type DatePreset = 'today' | '7days' | 'month' | 'all' | 'custom';
+
+function toLocalDateStr(date: Date) {
+  return date.toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+}
+
+function getPresetRange(preset: DatePreset): { from: string; to: string } | null {
+  const now = new Date();
+  const todayStr = toLocalDateStr(now);
+  if (preset === 'today') return { from: todayStr, to: todayStr };
+  if (preset === '7days') {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 6);
+    return { from: toLocalDateStr(d), to: todayStr };
+  }
+  if (preset === 'month') {
+    const d = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: toLocalDateStr(d), to: todayStr };
+  }
+  return null;
+}
+
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<PaymentStatus | 'all'>('all');
+
+  // ── Date filter state ──
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('mh_admin_token');
@@ -43,14 +70,55 @@ export default function Transactions() {
     return () => clearInterval(interval);
   }, [fetchTransactions]);
 
-  const filtered = filterStatus === 'all'
-    ? transactions
-    : transactions.filter(t => t.payment_status === filterStatus);
+  // Terapkan preset → update dateFrom & dateTo
+  const applyPreset = (preset: DatePreset) => {
+    setDatePreset(preset);
+    const range = getPresetRange(preset);
+    if (range) {
+      setDateFrom(range.from);
+      setDateTo(range.to);
+    } else {
+      setDateFrom('');
+      setDateTo('');
+    }
+  };
 
-  const totalRevenue = transactions.filter(t => t.payment_status === 'paid').reduce((s, t) => s + (t.amount_paid ?? 0), 0);
-  const pendingAmount = transactions.filter(t => t.payment_status === 'pending').reduce((s, t) => s + t.amount, 0);
-  const paidCount = transactions.filter(t => t.payment_status === 'paid').length;
-  const failedCount = transactions.filter(t => t.payment_status === 'failed').length;
+  // Ketika user ubah input manual → preset jadi 'custom'
+  const handleManualDate = (field: 'from' | 'to', val: string) => {
+    setDatePreset('all'); // reset preset label
+    if (field === 'from') setDateFrom(val);
+    else setDateTo(val);
+  };
+
+  const clearDateFilter = () => {
+    setDatePreset('all');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  // Filter transaksi berdasarkan tanggal & status
+  const dateFiltered = useMemo(() => {
+    return transactions.filter(t => {
+      const txDate = t.created_at.slice(0, 10); // YYYY-MM-DD
+      if (dateFrom && txDate < dateFrom) return false;
+      if (dateTo && txDate > dateTo) return false;
+      return true;
+    });
+  }, [transactions, dateFrom, dateTo]);
+
+  const filtered = useMemo(() => {
+    return filterStatus === 'all'
+      ? dateFiltered
+      : dateFiltered.filter(t => t.payment_status === filterStatus);
+  }, [dateFiltered, filterStatus]);
+
+  // Stats dihitung dari dateFiltered (ikut filter tanggal)
+  const totalRevenue = dateFiltered.filter(t => t.payment_status === 'paid').reduce((s, t) => s + (t.amount_paid ?? 0), 0);
+  const pendingAmount = dateFiltered.filter(t => t.payment_status === 'pending').reduce((s, t) => s + t.amount, 0);
+  const paidCount = dateFiltered.filter(t => t.payment_status === 'paid').length;
+  const failedCount = dateFiltered.filter(t => t.payment_status === 'failed').length;
+
+  const isDateActive = dateFrom !== '' || dateTo !== '';
 
   return (
     <div className="space-y-6">
@@ -105,11 +173,64 @@ export default function Transactions() {
               <div key={label} className="bg-neutral-900/60 border border-neutral-800/60 rounded-2xl p-4">
                 <div className={`flex items-center gap-2 ${color} mb-2`}>{icon}<span className="text-xs font-medium">{label}</span></div>
                 <p className={`text-xl font-bold ${color} break-words`}>{value}</p>
+                {isDateActive && <p className="text-[10px] text-neutral-600 mt-1">periode ini</p>}
               </div>
             ))}
           </div>
 
-          {/* Filter */}
+          {/* ── Date Filter: compact inline row ── */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Dropdown preset */}
+            <div className="relative">
+              <select
+                value={datePreset}
+                onChange={e => applyPreset(e.target.value as DatePreset)}
+                className="appearance-none bg-neutral-900/70 border border-neutral-700/70 text-neutral-300 text-xs font-medium rounded-xl pl-3 pr-8 py-2 focus:outline-none focus:border-[#E4C670]/50 transition-colors cursor-pointer"
+              >
+                <option value="all">Semua Waktu</option>
+                <option value="today">Hari Ini</option>
+                <option value="7days">7 Hari Terakhir</option>
+                <option value="month">Bulan Ini</option>
+                {datePreset === 'custom' && <option value="custom">Kustom</option>}
+              </select>
+              <Calendar className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" />
+            </div>
+
+            {/* Date inputs */}
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => handleManualDate('from', e.target.value)}
+                className="bg-neutral-900/70 border border-neutral-700/70 text-neutral-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-[#E4C670]/50 transition-colors w-[130px]"
+              />
+              <span className="text-neutral-600 text-xs">—</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom}
+                onChange={e => handleManualDate('to', e.target.value)}
+                className="bg-neutral-900/70 border border-neutral-700/70 text-neutral-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-[#E4C670]/50 transition-colors w-[130px]"
+              />
+            </div>
+
+            {/* Clear */}
+            {isDateActive && (
+              <button
+                onClick={clearDateFilter}
+                title="Hapus filter tanggal"
+                className="flex items-center gap-1 text-xs text-neutral-500 hover:text-red-400 border border-neutral-700/60 hover:border-red-500/40 bg-neutral-900/60 px-2.5 py-2 rounded-xl transition-all"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {isDateActive && (
+              <span className="text-xs text-neutral-600">{dateFiltered.length} transaksi</span>
+            )}
+          </div>
+
+          {/* Filter Status */}
           <div className="flex flex-wrap gap-2">
             {(['all', 'pending', 'processing', 'paid', 'failed', 'refunded'] as (PaymentStatus | 'all')[]).map(s => {
               const cfg = s === 'all' ? { label: 'Semua', color: 'text-white', bg: '' } : PAYMENT_STATUS_CONFIG[s];
@@ -127,7 +248,7 @@ export default function Transactions() {
                 >
                   {s === 'all' ? 'Semua' : PAYMENT_STATUS_CONFIG[s].label}
                   {s !== 'all' && (
-                    <span className="ml-1.5 opacity-70">{transactions.filter(t => t.payment_status === s).length}</span>
+                    <span className="ml-1.5 opacity-70">{dateFiltered.filter(t => t.payment_status === s).length}</span>
                   )}
                 </button>
               );
@@ -203,7 +324,8 @@ export default function Transactions() {
 
           {/* Summary footer */}
           <div className="flex flex-wrap gap-4 text-xs text-neutral-600 pt-1">
-            <span>Total {transactions.length} transaksi</span>
+            <span>Total semua: {transactions.length} transaksi</span>
+            {isDateActive && <><span>·</span><span className="text-[#E4C670]/70">Periode ini: {dateFiltered.length}</span></>}
             <span>·</span>
             <span>Ditampilkan: {filtered.length}</span>
           </div>

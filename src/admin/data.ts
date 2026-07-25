@@ -4,7 +4,9 @@
 // ============================================================
 export type OrderStatus =
   | 'pending'
+  | 'confirmed'
   | 'preparing'
+  | 'ready'
   | 'delivered'
   | 'cancelled';
 export type PaymentStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'refunded';
@@ -271,10 +273,22 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatus, {
     bg: 'bg-amber-400/10 border-amber-400/20'
   },
 
+  confirmed: {
+    label: 'Dikonfirmasi',
+    color: 'text-sky-400',
+    bg: 'bg-sky-400/10 border-sky-400/20'
+  },
+
   preparing: {
     label: 'Diproses',
     color: 'text-purple-400',
     bg: 'bg-purple-400/10 border-purple-400/20'
+  },
+
+  ready: {
+    label: 'Siap Kirim',
+    color: 'text-indigo-400',
+    bg: 'bg-indigo-400/10 border-indigo-400/20'
   },
 
   delivered: {

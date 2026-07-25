@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const crypto = require("crypto");
 const db = require("../db");
+const { sendWhatsappReceipt } = require("../services/whatsapp");
 require("dotenv").config();
 
 /**
@@ -56,15 +57,24 @@ router.post("/midtrans", async (req, res) => {
   try {
     await conn.beginTransaction();
 
+    // Join ke customers supaya kita punya nama & nomor WA untuk kirim struk
     const [rows] = await conn.query(
       `
       SELECT
         o.id AS order_id,
+        o.grand_total,
+        o.delivery_method,
+        o.delivery_address,
+        o.delivery_area_label,
         t.id AS tx_id,
-        t.payment_status
+        t.payment_status,
+        c.name AS customer_name,
+        c.phone AS customer_phone
       FROM orders o
       JOIN transactions t
         ON t.order_id = o.id
+      JOIN customers c
+        ON c.id = o.customer_id
       WHERE o.order_number = ?
       LIMIT 1
       `,
@@ -78,7 +88,17 @@ router.post("/midtrans", async (req, res) => {
       });
     }
 
-    const { order_id: oid, tx_id, payment_status } = rows[0];
+    const {
+      order_id: oid,
+      tx_id,
+      payment_status,
+      customer_name,
+      customer_phone,
+      grand_total,
+      delivery_method,
+      delivery_address,
+      delivery_area_label,
+    } = rows[0];
 
     if (payment_status === "paid") {
       await conn.rollback();
@@ -147,6 +167,32 @@ router.post("/midtrans", async (req, res) => {
       await conn.commit();
 
       console.log(`${order_id} berhasil dibayar`);
+
+      // 1. Ambil rincian item belanjaan dari database (jalankan sebelum connection dirilis)
+      const [orderItems] = await conn.query(
+        `SELECT product_name, quantity FROM order_items WHERE order_id = ?`,
+        [oid]
+      );
+      const itemsList = orderItems.map(item => `- ${item.quantity}x ${item.product_name}`).join('\n');
+
+      const formattedAddress = delivery_area_label 
+        ? `${delivery_area_label} — ${delivery_address ? delivery_address.trim() : '-'}`
+        : (delivery_address ? delivery_address.trim() : '-');
+      const deliveryInfo = delivery_method === 'delivery'
+        ? `*Alamat Pengiriman:*\n${formattedAddress}`
+        : `*Alamat Pickup:*\nTaman adhiloka blok L no 21 Neglasari Kota Tangerang`;
+
+      // ── Kirim struk sukses via WhatsApp (async, tidak memblokir response) ──
+      const waSuccessMessage =
+        `Halo ${customer_name},\n\n` +
+        `Pembayaran untuk pesanan *#${order_id}* sebesar *Rp ${Number(grand_total).toLocaleString('id-ID')}* ` +
+        `telah *BERHASIL* kami terima. ✓\n\n` +
+        `*Orderan Kakak:*\n${itemsList}\n\n` +
+        `${deliveryInfo}\n\n` +
+        `Pesanan Anda akan segera kami siapkan. Nanti jika sudah siap akan segera diinfokan ya kak. Terima kasih! 🥰🙏`;
+      sendWhatsappReceipt(customer_phone, waSuccessMessage).catch(err =>
+        console.error('[webhook/midtrans] Gagal kirim WA struk sukses:', err.message)
+      );
 
       return res.json({
         success: true,

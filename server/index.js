@@ -15,12 +15,21 @@ const authRoutes = require('./routes/auth');
 const deliveryAreaRoutes = require('./routes/delivery-areas');
 const { scheduleCleanup } = require('./jobs/cleanup');
 
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy header (sangat krusial untuk mendeteksi IP asli user di server hosting/Nginx)
+app.set('trust proxy', 1);
+
 // ─────────────────────────────────────────────────────────────
-// Middleware
+// Security Middleware
 // ─────────────────────────────────────────────────────────────
+
+// Helmet mengamankan Express app dengan menyetel berbagai HTTP headers (XSS protection, Clickjacking protection, dll)
+app.use(helmet());
 
 app.use(cors({
   origin: [
@@ -31,9 +40,33 @@ app.use(cors({
   credentials: true,
 }));
 
+// Rate Limiting Global: batasi DDoS dan spamming API
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 menit
+  max: 300, // maks 300 request per menit per IP
+  message: { error: 'Terlalu banyak permintaan dari perangkat Anda. Silakan coba lagi nanti.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Lewati rate limit untuk endpoint webhook Midtrans agar notifikasi pembayaran tidak pernah terblokir
+  skip: (req) => req.originalUrl.startsWith('/api/webhook'),
+});
+
+app.use('/api', apiLimiter);
+
+// Rate Limiting Spesifik Checkout: proteksi stock reservation dari bot/spam booking palsu
+const checkoutLimiter = rateLimit({
+  windowMs: 2 * 60 * 1000, // 2 menit
+  max: 8, // maks 8 kali klik checkout per 2 menit per IP
+  message: { error: 'Terlalu banyak klik checkout. Silakan tunggu 2 menit sebelum mencoba lagi.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api/checkout/reserve', checkoutLimiter);
+
 // Midtrans webhook menggunakan JSON biasa
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10kb' })); // Batasi ukuran payload json maks 10kb untuk mencegah payload injection
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // ─────────────────────────────────────────────────────────────
 // Static Files

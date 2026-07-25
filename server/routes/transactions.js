@@ -10,10 +10,6 @@ const { requireAdminAuth } = require('../middleware/auth');
 
 // 🔒 Semua route di file ini wajib login admin yang valid
 router.use(requireAdminAuth);
-// ─────────────────────────────────────────────────────────
-// GET /api/transactions
-// List semua transaksi, terbaru duluan, join order_number & customer_name
-// ─────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
     const [rows] = await db.query(

@@ -9,7 +9,9 @@
 // ============================================================
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const db = require('../db');
+const { sendWhatsappReceipt } = require('../services/whatsapp');
 require('dotenv').config();
 
 const TTL_MINUTES = parseInt(process.env.RESERVATION_TTL_MINUTES || '15');
@@ -129,10 +131,17 @@ router.post('/reserve', async (req, res) => {
       await conn.query('SELECT id FROM customers WHERE phone = ?', [customer.phone.trim()])
     )[0][0]?.id;
 
-    // Generate order number unik untuk Midtrans
-    const crypto = require("crypto");
+    // Generate order number unik untuk Midtrans.
+    // PENTING: dibuat pendek (bukan UUID penuh) supaya tetap muat di kolom
+    // VARCHAR yang wajar (order_number / transaction_number) dan tetap enak
+    // dibaca customer di struk WhatsApp/invoice.
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const shortId = crypto.randomBytes(4).toString('hex'); // 8 karakter, cukup unik
+    const orderNumber = `MH-${dateStr}-${shortId}`; // contoh: MH-202607-a91f3c2b
 
-    const orderNumber = `MH-${crypto.randomUUID()}`;
+    let subtotal = 0;
+    let addonsTotal = 0;
 
     for (const item of items) {
       subtotal += (stockMap[item.productId]?.price || item.unitPrice) * item.quantity;
@@ -141,8 +150,6 @@ router.post('/reserve', async (req, res) => {
       addonsTotal += addon.price;
     }
 
-    // Gunakan deliveryFee dari klien (sudah dihitung berdasarkan area dari DB)
-    // Jika delivery & ada area ID, cross-check ke tabel delivery_areas untuk keamanan
     let deliveryFee = 0;
     if (deliveryMethod === 'delivery') {
       if (deliveryAreaId) {
@@ -218,37 +225,79 @@ router.post('/reserve', async (req, res) => {
       reservationIds.push(resResult.insertId);
     }
 
+    // ── COMMIT TRANSACTION SEBELUM PANGGIL MIDTRANS ──
+    // Row locks pada database dilepas secepatnya agar antrean request checkout lain tidak tersumbat.
+    await conn.commit();
+    conn.release(); // Lepas koneksi ke pool agar siap melayani request lain
+
     // ── STEP 6: Buat transaksi + generate QRIS (mock atau Midtrans) ───────
+    // Dilakukan di luar transaction block agar network latency dari API Midtrans tidak menahan lock database.
     const txNumber = `TXN-${orderNumber}`;
     let qrisPayload, midtransTransactionId;
 
-    if (MOCK_MODE) {
-      // MODE MOCK: Generate QR string palsu untuk testing lokal tanpa Midtrans
-      qrisPayload = generateMockQris(orderNumber, grandTotal);
-      midtransTransactionId = `MOCK-${orderNumber}`;
-    } else {
-      // MODE MIDTRANS: Panggil Core API sungguhan (charge QRIS)
-      const midtransResult = await callMidtransQrisCharge({
-        orderId: orderNumber,
-        grossAmount: grandTotal,
-        customer,
-        expiryMinutes: TTL_MINUTES,
+    try {
+      if (MOCK_MODE) {
+        // MODE MOCK: Generate QR string palsu untuk testing lokal tanpa Midtrans
+        qrisPayload = generateMockQris(orderNumber, grandTotal);
+        midtransTransactionId = `MOCK-${orderNumber}`;
+      } else {
+        // MODE MIDTRANS: Panggil Core API sungguhan (charge QRIS)
+        const midtransResult = await callMidtransQrisCharge({
+          orderId: orderNumber,
+          grossAmount: grandTotal,
+          customer,
+          expiryMinutes: TTL_MINUTES,
+        });
+        qrisPayload = midtransResult.qr_string;
+        midtransTransactionId = midtransResult.transaction_id;
+      }
+
+      // Insert ke tabel transactions menggunakan koneksi pool baru
+      await db.query(
+        `INSERT INTO transactions
+           (order_id, transaction_number, payment_method, payment_status,
+            amount, expired_at, gateway_ref)
+         VALUES (?, ?, 'qris', 'pending', ?, ?, ?)`,
+        [orderId, txNumber, grandTotal, expiresAt, midtransTransactionId]
+      );
+    } catch (midtransError) {
+      console.error('[checkout/reserve] Midtrans / Transaction insert error, rolling back changes:', midtransError);
+      
+      // Bersihkan reservasi stok & batalkan order karena QRIS gagal dibuat
+      await db.query(`DELETE FROM stock_reservations WHERE order_id = ?`, [orderId]);
+      await db.query(
+        `UPDATE orders SET order_status = 'cancelled', admin_notes = ? WHERE id = ?`, 
+        [`Batal otomatis: gagal generate QRIS (${midtransError.message})`, orderId]
+      );
+
+      return res.status(502).json({
+        error: 'Gagal memproses metode pembayaran QRIS. Silakan coba lagi.',
+        detail: midtransError.message
       });
-      qrisPayload = midtransResult.qr_string;
-      midtransTransactionId = midtransResult.transaction_id;
     }
 
-    // Insert ke tabel transactions
-    await conn.query(
-      `INSERT INTO transactions
-         (order_id, transaction_number, payment_method, payment_status,
-          amount, expired_at, gateway_ref)
-       VALUES (?, ?, 'qris', 'pending', ?, ?, ?)`,
-      [orderId, txNumber, grandTotal, expiresAt, midtransTransactionId]
-    );
+    // ── Kirim struk awal via WhatsApp (async, tidak memblokir response) ────
+    const itemsList = items.map(item => `- ${item.quantity}x ${item.name}`).join('\n');
+    const areaLabel = deliveryAreaLabel || deliveryArea || '';
+    const formattedAddress = areaLabel 
+      ? `${areaLabel} — ${deliveryAddress.trim()}`
+      : deliveryAddress.trim();
+    const deliveryInfo = deliveryMethod === 'delivery'
+      ? `*Alamat Pengiriman:*\n${formattedAddress}`
+      : `*Alamat Pickup:*\nTaman adhiloka blok L no 21 Neglasari Kota Tangerang`;
 
-    // ── COMMIT — semua berhasil ────────────────────────────────────────────
-    await conn.commit();
+    const waMessage =
+      `Halo ${customer.name},\n\n` +
+      `Terima kasih telah memesan di Mamah Hemat!\n` +
+      `Pesanan Anda *#${orderNumber}* telah kami terima.\n\n` +
+      `*Orderan Kakak:*\n${itemsList}\n\n` +
+      `*Total Tagihan:* Rp ${grandTotal.toLocaleString('id-ID')}\n` +
+      `*Status:* Menunggu Pembayaran ⏳\n\n` +
+      `${deliveryInfo}\n\n` +
+      `Silakan lakukan pembayaran menggunakan QRIS yang tertera di layar Anda sebelum waktu habis (${TTL_MINUTES} menit).`;
+    sendWhatsappReceipt(customer.phone, waMessage).catch(err =>
+      console.error('[checkout/reserve] Gagal kirim WA struk awal:', err.message)
+    );
 
     return res.status(201).json({
       success: true,
@@ -264,14 +313,18 @@ router.post('/reserve', async (req, res) => {
     });
 
   } catch (err) {
-    await conn.rollback();
-    console.error('[checkout/reserve] Error:', err);
+    if (conn.connection && conn.connection._state === 'authenticated') {
+      await conn.rollback();
+    }
+    console.error('[checkout/reserve] Transaction error:', err);
     return res.status(500).json({
       error: 'Terjadi kesalahan internal. Silakan coba lagi.',
       detail: process.env.NODE_ENV === 'development' ? err.message : undefined,
     });
   } finally {
-    conn.release();
+    if (conn.connection && conn.connection._state === 'authenticated') {
+      conn.release();
+    }
   }
 });
 

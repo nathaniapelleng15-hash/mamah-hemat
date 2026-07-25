@@ -1,31 +1,59 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ClipboardList, Clock, CheckCircle2, ChefHat, Truck,
   XCircle, ChevronDown, ChevronUp, Phone, StickyNote,
   Calendar, RefreshCw, AlertCircle, MapPin, ExternalLink,
-  Navigation, Package, User, Check, ArrowRight, Copy, CopyCheck
+  Navigation, Package, User, Check, ArrowRight, Copy, CopyCheck, X
 } from 'lucide-react';
 import {
   Order, OrderStatus,
   ORDER_STATUS_CONFIG, formatIDR, formatDate, timeAgo
 } from '../data';
 
+type DatePreset = 'today' | '7days' | 'month' | 'all' | 'custom';
+
+function toLocalDateStr(date: Date) {
+  return date.toLocaleDateString('en-CA');
+}
+
+function getPresetRange(preset: DatePreset): { from: string; to: string } | null {
+  const now = new Date();
+  const todayStr = toLocalDateStr(now);
+  if (preset === 'today') return { from: todayStr, to: todayStr };
+  if (preset === '7days') {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 6);
+    return { from: toLocalDateStr(d), to: todayStr };
+  }
+  if (preset === 'month') {
+    const d = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: toLocalDateStr(d), to: todayStr };
+  }
+  return null;
+}
+
 const STATUS_FLOW: OrderStatus[] = [
   'pending',
+  'confirmed',
   'preparing',
+  'ready',
   'delivered'
 ];
 
 const STATUS_ICONS: Record<OrderStatus, React.ReactNode> = {
   pending: <Clock className="w-3.5 h-3.5" />,
+  confirmed: <CheckCircle2 className="w-3.5 h-3.5" />,
   preparing: <ChefHat className="w-3.5 h-3.5" />,
+  ready: <Package className="w-3.5 h-3.5" />,
   delivered: <Truck className="w-3.5 h-3.5" />,
   cancelled: <XCircle className="w-3.5 h-3.5" />,
 };
 
 const NEXT_ACTION_LABEL: Partial<Record<OrderStatus, string>> = {
-  pending: 'Mulai Diproses',
-  preparing: 'Tandai Terkirim',
+  pending: 'Konfirmasi Bayar',
+  confirmed: 'Mulai Diproses',
+  preparing: 'Siap Kirim',
+  ready: 'Tandai Terkirim',
 };
 
 export default function Orders() {
@@ -38,6 +66,27 @@ export default function Orders() {
   const [savingNoteId, setSavingNoteId] = useState<number | null>(null);
   const [updatingStatusId, setUpdatingStatusId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  // ── Date filter state ──
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  const applyPreset = (preset: DatePreset) => {
+    setDatePreset(preset);
+    const range = getPresetRange(preset);
+    if (range) { setDateFrom(range.from); setDateTo(range.to); }
+    else { setDateFrom(''); setDateTo(''); }
+  };
+
+  const handleManualDate = (field: 'from' | 'to', val: string) => {
+    setDatePreset('all');
+    if (field === 'from') setDateFrom(val);
+    else setDateTo(val);
+  };
+
+  const clearDateFilter = () => { setDatePreset('all'); setDateFrom(''); setDateTo(''); };
+  const isDateActive = dateFrom !== '' || dateTo !== '';
 
   // Ambil token admin dari localStorage untuk auth header
   const getAuthHeaders = () => {
@@ -71,13 +120,23 @@ export default function Orders() {
     return () => clearInterval(interval);
   }, [fetchOrders]);
 
-  const filtered = filterStatus === 'all' ? orders : orders.filter(o => o.order_status === filterStatus);
+  const dateFiltered = useMemo(() => {
+    return orders.filter(o => {
+      const d = o.created_at.slice(0, 10);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      return true;
+    });
+  }, [orders, dateFrom, dateTo]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayOrders = orders.filter(o => o.created_at.startsWith(todayStr));
-  const pendingCount = orders.filter(o => o.order_status === 'pending').length;
-  const activeCount = orders.filter(o => ['confirmed', 'preparing', 'ready'].includes(o.order_status)).length;
-  const doneCount = orders.filter(o => o.order_status === 'delivered').length;
+  const filtered = filterStatus === 'all' ? dateFiltered : dateFiltered.filter(o => o.order_status === filterStatus);
+
+  // Stats ikut filter tanggal
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayOrders = isDateActive ? dateFiltered : orders.filter(o => o.created_at.startsWith(todayStr));
+  const pendingCount = dateFiltered.filter(o => o.order_status === 'pending').length;
+  const activeCount = dateFiltered.filter(o => ['confirmed', 'preparing', 'ready'].includes(o.order_status)).length;
+  const doneCount = dateFiltered.filter(o => o.order_status === 'delivered').length;
 
   // Susun alamat lengkap jadi satu teks siap-copy (area + alamat detail)
   const buildFullAddress = (order: Order) => {
@@ -187,7 +246,7 @@ export default function Orders() {
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: 'Pesanan Hari Ini', value: todayOrders.length, color: 'text-[#E4C670]', icon: <ClipboardList className="w-4 h-4" /> },
+              { label: isDateActive ? 'Pesanan Periode Ini' : 'Pesanan Hari Ini', value: todayOrders.length, color: 'text-[#E4C670]', icon: <ClipboardList className="w-4 h-4" /> },
               { label: 'Perlu Konfirmasi', value: pendingCount, color: 'text-amber-400', icon: <Clock className="w-4 h-4" /> },
               { label: 'Sedang Diproses', value: activeCount, color: 'text-blue-400', icon: <ChefHat className="w-4 h-4" /> },
               { label: 'Terkirim', value: doneCount, color: 'text-emerald-400', icon: <Truck className="w-4 h-4" /> },
@@ -197,6 +256,58 @@ export default function Orders() {
                 <p className={`text-2xl font-bold ${color}`}>{value}</p>
               </div>
             ))}
+          </div>
+
+          {/* ── Date Filter: compact inline row ── */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Dropdown preset */}
+            <div className="relative">
+              <select
+                value={datePreset}
+                onChange={e => applyPreset(e.target.value as DatePreset)}
+                className="appearance-none bg-neutral-900/70 border border-neutral-700/70 text-neutral-300 text-xs font-medium rounded-xl pl-3 pr-8 py-2 focus:outline-none focus:border-[#E4C670]/50 transition-colors cursor-pointer"
+              >
+                <option value="all">Semua Waktu</option>
+                <option value="today">Hari Ini</option>
+                <option value="7days">7 Hari Terakhir</option>
+                <option value="month">Bulan Ini</option>
+                {datePreset === 'custom' && <option value="custom">Kustom</option>}
+              </select>
+              <Calendar className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" />
+            </div>
+
+            {/* Date inputs */}
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => handleManualDate('from', e.target.value)}
+                className="bg-neutral-900/70 border border-neutral-700/70 text-neutral-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-[#E4C670]/50 transition-colors w-[130px]"
+              />
+              <span className="text-neutral-600 text-xs">—</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom}
+                onChange={e => handleManualDate('to', e.target.value)}
+                className="bg-neutral-900/70 border border-neutral-700/70 text-neutral-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-[#E4C670]/50 transition-colors w-[130px]"
+              />
+            </div>
+
+            {/* Clear */}
+            {isDateActive && (
+              <button
+                onClick={clearDateFilter}
+                title="Hapus filter tanggal"
+                className="flex items-center gap-1 text-xs text-neutral-500 hover:text-red-400 border border-neutral-700/60 hover:border-red-500/40 bg-neutral-900/60 px-2.5 py-2 rounded-xl transition-all"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {isDateActive && (
+              <span className="text-xs text-neutral-600">{dateFiltered.length} pesanan</span>
+            )}
           </div>
 
           {/* Filter Tabs */}
@@ -217,7 +328,7 @@ export default function Orders() {
                 >
                   {s === 'all' ? 'Semua' : ORDER_STATUS_CONFIG[s].label}
                   {s !== 'all' && (
-                    <span className="ml-1.5 opacity-70">{orders.filter(o => o.order_status === s).length}</span>
+                    <span className="ml-1.5 opacity-70">{dateFiltered.filter(o => o.order_status === s).length}</span>
                   )}
                 </button>
               );

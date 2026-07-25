@@ -9,7 +9,7 @@ const pool = mysql.createPool({
   password:           process.env.DB_PASSWORD || '',
   database:           process.env.DB_NAME     || 'mamah_hemat_db',
   waitForConnections: true,
-  connectionLimit:    10,        // max 10 concurrent queries
+  connectionLimit:    80,        // raised to 80 to handle high concurrent checkouts
   queueLimit:         0,
   timezone:           '+07:00',  // WIB
   charset:            'utf8mb4',
