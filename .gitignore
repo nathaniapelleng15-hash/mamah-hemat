@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Foto produk yang diupload admin — disimpan di server hosting, bukan di Git
+public/uploads/
