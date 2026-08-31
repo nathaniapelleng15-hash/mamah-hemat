@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Package, Plus, Pencil, Trash2, Eye, EyeOff,
-  X, Check, Tag, Image as ImageIcon, Info
+  X, Check, Tag, Image as ImageIcon, Info, AlertTriangle
 } from 'lucide-react';
 import {
   dummyProducts, dummyAddons, dummyCategories,
@@ -392,6 +392,7 @@ export default function Products() {
   const [categoryModal, setCategoryModal] = useState<{ open: boolean; category: Category | null }>({ open: false, category: null });
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<number | null>(null);
+  const [hasOrderWarningModal, setHasOrderWarningModal] = useState<{ open: boolean; productId: number; productName: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   const getAuthHeaders = () => {
@@ -451,15 +452,27 @@ export default function Products() {
   };
 
   // ─── Hapus Produk ─────────────────────────────────────────
-  const deleteProduct = async (id: number) => {
+  const deleteProduct = async (id: number, force = false) => {
     setSaving(true);
     try {
-      const res = await fetch(`/api/products/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const url = `/api/products/${id}` + (force ? '?force=true' : '');
+      const res = await fetch(url, { method: 'DELETE', headers: getAuthHeaders() });
+      const data = await res.json();
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Gagal menghapus produk.');
+        if (res.status === 409 || data.hasOrders) {
+          const p = products.find(x => x.id === id);
+          setHasOrderWarningModal({
+            open: true,
+            productId: id,
+            productName: p?.name || 'Produk'
+          });
+          setConfirmDelete(null);
+          return;
+        }
+        throw new Error(data.error || 'Gagal menghapus produk.');
       }
       setConfirmDelete(null);
+      setHasOrderWarningModal(null);
       await fetchData();
     } catch (err: any) {
       alert(err.message);
@@ -794,6 +807,52 @@ export default function Products() {
       )}
       {categoryModal.open && (
         <CategoryModal category={categoryModal.category} onClose={() => setCategoryModal({ open: false, category: null })} onSave={saveCategory} />
+      )}
+
+      {/* Dialog Peringatan Produk Memiliki Pesanan */}
+      {hasOrderWarningModal?.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-[#111111] border border-amber-500/30 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4">
+            <div className="flex items-center gap-3 text-amber-400">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
+              <h3 className="font-bold text-white text-base">Produk Memiliki Riwayat Pesanan</h3>
+            </div>
+            <p className="text-sm text-neutral-300 leading-relaxed">
+              Produk <span className="font-semibold text-white">"{hasOrderWarningModal.productName}"</span> sudah pernah dipesan oleh pelanggan.
+            </p>
+            <p className="text-xs text-neutral-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+              <strong>Rekomendasi:</strong> Nonaktifkan produk agar produk tidak dapat dilihat/dibeli di katalog pelanggan, tetapi riwayat laporan pesanan lama tetap tersimpan dengan baik.
+            </p>
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={async () => {
+                  const p = products.find(x => x.id === hasOrderWarningModal.productId);
+                  if (p) {
+                    await saveProduct({ ...p, is_active: false });
+                  }
+                  setHasOrderWarningModal(null);
+                }}
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-[#E4C670] text-black hover:bg-[#d6b761] transition-all flex items-center justify-center gap-2"
+              >
+                <EyeOff className="w-4 h-4" /> Nonaktifkan Produk (Disarankan)
+              </button>
+              <button
+                onClick={async () => {
+                  await deleteProduct(hasOrderWarningModal.productId, true);
+                }}
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-all flex items-center justify-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" /> Tetap Hapus Permanen (Force Delete)
+              </button>
+              <button
+                onClick={() => setHasOrderWarningModal(null)}
+                className="w-full py-2 px-4 rounded-xl text-xs text-neutral-400 hover:bg-white/5 border border-neutral-800 transition-all"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

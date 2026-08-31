@@ -5,29 +5,7 @@
 
 USE mamah_hemat_db;
 
--- 1. Tambahkan kolom stock_qty ke tabel products (default diisi 100 porsi)
-ALTER TABLE products 
-ADD COLUMN stock_qty INT UNSIGNED NOT NULL DEFAULT 100 AFTER image_url;
-
--- 2. Buat tabel stock_reservations untuk sistem pengunci stok sementara
-CREATE TABLE IF NOT EXISTS stock_reservations (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  order_id    INT UNSIGNED NOT NULL,
-  product_id  INT UNSIGNED NOT NULL,
-  quantity    SMALLINT UNSIGNED NOT NULL DEFAULT 1,
-  status      ENUM('pending','confirmed','released') NOT NULL DEFAULT 'pending',
-  expires_at  DATETIME NOT NULL,                         -- batas waktu pembayaran
-  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-  -- Index kritis untuk row-locking saat checkout bersamaan
-  INDEX idx_reservation_product_status (product_id, status, expires_at),
-  INDEX idx_reservation_order          (order_id),
-  INDEX idx_reservation_expires        (status, expires_at),
-
-  CONSTRAINT fk_reservation_order   FOREIGN KEY (order_id)   REFERENCES orders(id)   ON DELETE CASCADE,
-  CONSTRAINT fk_reservation_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
+-- 1. stock_qty and 2. stock_reservations are already created in schema.sql. Skipping.
 
 -- ============================================================
 -- MIGRATION v2: Area Pengantaran Dinamis + Kolom Orders
@@ -74,7 +52,7 @@ INSERT INTO delivery_areas (label, fee, sort_order) VALUES
 -- 4. Kolom orders yang sudah ditambahkan user — jalankan hanya jika belum ada
 --    (phpMyAdmin akan error jika kolom sudah ada, abaikan saja error tersebut)
 ALTER TABLE orders
-  ADD COLUMN IF NOT EXISTS delivery_area_id    INT(11)       DEFAULT NULL AFTER delivery_method,
-  ADD COLUMN IF NOT EXISTS delivery_area_label VARCHAR(255)  DEFAULT NULL AFTER delivery_area_id,
-  ADD COLUMN IF NOT EXISTS delivery_area       VARCHAR(255)  DEFAULT NULL AFTER delivery_area_label,
-  ADD COLUMN IF NOT EXISTS delivery_map_link   VARCHAR(500)  DEFAULT NULL AFTER delivery_address;
+  ADD COLUMN delivery_area_id    INT(11)       DEFAULT NULL AFTER delivery_method,
+  ADD COLUMN delivery_area_label VARCHAR(255)  DEFAULT NULL AFTER delivery_area_id,
+  ADD COLUMN delivery_area       VARCHAR(255)  DEFAULT NULL AFTER delivery_area_label,
+  ADD COLUMN delivery_map_link   VARCHAR(500)  DEFAULT NULL AFTER delivery_address;

@@ -59,6 +59,7 @@ export default function App() {
   const [menuList, setMenuList] = useState<MenuItem[]>([]);
   const [addOnsList, setAddOnsList] = useState<AddOn[]>([]);
   const [deliveryAreas, setDeliveryAreas] = useState<DeliveryArea[]>([]);
+  const [adminWhatsapp, setAdminWhatsapp] = useState('6281290840140');
 
   useEffect(() => {
     const fetchCatalog = async () => {
@@ -110,8 +111,22 @@ export default function App() {
       }
     };
 
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch('/api/settings');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.settings?.admin_whatsapp) {
+          setAdminWhatsapp(data.settings.admin_whatsapp);
+        }
+      } catch (err) {
+        console.error('Gagal memuat pengaturan:', err);
+      }
+    };
+
     fetchCatalog();
     fetchDeliveryAreas();
+    fetchSettings();
   }, []);
 
   const [screen, setScreen] = useState<"catalog" | "checkout" | "payment" | "receipt">("catalog");
@@ -741,7 +756,7 @@ export default function App() {
                 <div className="p-4 rounded-2xl bg-white/5 border border-white/5 text-center mt-3">
                   <p className="text-[11px] text-neutral-400 leading-relaxed">
                     Butuh penyesuaian porsi besar atau piring khusus? <br />
-                    <a href="https://wa.me/6281290840140?text=Halo%20Mamah%20Hemat%2C%20saya%20mau%20tanya%20soal%20menu%2Fpesanan."
+                    <a href={`https://wa.me/${adminWhatsapp}?text=Halo%20Mamah%20Hemat%2C%20saya%20mau%20tanya%20soal%20menu%2Fpesanan.`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[#E4C670] font-medium cursor-pointer underline hover:opacity-90"
@@ -1304,7 +1319,7 @@ export default function App() {
                     </div>
 
                     <a
-                      href={`https://wa.me/6281234567890?text=Halo%20Mamah%20Hemat,%20saya%20sudah%20melakukan%20pembayaran%20untuk%20Invoice%20${transactionId}%20sebesar%20${grandTotal}.%20Mohon%20segera%20diproses%20ya.`}
+                      href={`https://wa.me/${adminWhatsapp}?text=Halo%20Mamah%20Hemat,%20saya%20sudah%20melakukan%20pembayaran%20untuk%20Invoice%20${transactionId}%20sebesar%20${grandTotal}.%20Mohon%20segera%20diproses%20ya.`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="w-full bg-neutral-900 text-[#E4C670] hover:bg-neutral-800 font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-1.5 transition-colors border border-[#E4C670]/20 cursor-pointer"

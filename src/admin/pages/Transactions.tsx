@@ -52,6 +52,12 @@ export default function Transactions() {
     try {
       setLoadError(null);
       const res = await fetch('/api/transactions', { headers: getAuthHeaders() });
+      if (res.status === 401) {
+        localStorage.removeItem('mh_admin_token');
+        localStorage.removeItem('mh_admin_expiry');
+        window.location.href = '/admin';
+        return;
+      }
       if (!res.ok) throw new Error('Gagal memuat data transaksi dari server.');
       const data = await res.json();
       setTransactions(data.transactions || []);

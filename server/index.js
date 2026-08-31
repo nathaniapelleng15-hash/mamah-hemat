@@ -13,6 +13,7 @@ const orderRoutes = require('./routes/orders');
 const transactionRoutes = require('./routes/transactions');
 const authRoutes = require('./routes/auth');
 const deliveryAreaRoutes = require('./routes/delivery-areas');
+const settingsRoutes     = require('./routes/settings');
 const { scheduleCleanup } = require('./jobs/cleanup');
 
 const helmet = require('helmet');
@@ -88,6 +89,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/delivery-areas', deliveryAreaRoutes);
+app.use('/api/settings',        settingsRoutes);
 
 // ─────────────────────────────────────────────────────────────
 // Health Check

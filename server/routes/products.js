@@ -184,14 +184,30 @@ router.put('/:id', async (req, res) => {
 // ─────────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
+  const { force } = req.query;
 
   try {
     // Cek apakah produk sedang digunakan di tabel order_items (mencegah foreign key error)
     const [orders] = await db.query('SELECT id FROM order_items WHERE product_id = ? LIMIT 1', [id]);
     if (orders.length > 0) {
-      return res.status(409).json({
-        error: 'Produk tidak bisa dihapus karena sudah memiliki riwayat pesanan (order items).'
-      });
+      if (force === 'true') {
+        // 1. Hapus reservasi stok terkait jika ada
+        await db.query('DELETE FROM stock_reservations WHERE product_id = ?', [id]).catch(() => {});
+
+        // 2. Coba set product_id = NULL di order_items agar data riwayat pesanan (nama, qty, harga) tetap tersimpan
+        try {
+          await db.query('ALTER TABLE order_items MODIFY product_id INT UNSIGNED NULL');
+          await db.query('UPDATE order_items SET product_id = NULL WHERE product_id = ?', [id]);
+        } catch (updateErr) {
+          // Jika DB tidak mengizinkan NULL, hapus baris order_items terkait demi force delete
+          await db.query('DELETE FROM order_items WHERE product_id = ?', [id]);
+        }
+      } else {
+        return res.status(409).json({
+          hasOrders: true,
+          error: 'Produk tidak bisa dihapus karena sudah memiliki riwayat pesanan (order items).'
+        });
+      }
     }
 
     await db.query('DELETE FROM products WHERE id = ?', [id]);

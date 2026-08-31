@@ -15,6 +15,8 @@ CREATE DATABASE IF NOT EXISTS mamah_hemat_db
 
 USE mamah_hemat_db;
 
+SET FOREIGN_KEY_CHECKS = 0;
+
 -- ============================================================
 -- MODUL 1: MANAJEMEN PRODUK
 -- ============================================================
@@ -142,13 +144,13 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS order_items (
   id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   order_id     INT UNSIGNED NOT NULL,
-  product_id   INT UNSIGNED NOT NULL,
+  product_id   INT UNSIGNED NULL,
   product_name VARCHAR(200) NOT NULL,           -- snapshot nama saat order (antisipasi perubahan harga)
   unit_price   DECIMAL(12,2) NOT NULL,          -- snapshot harga saat order
   quantity     SMALLINT UNSIGNED NOT NULL DEFAULT 1,
   subtotal     DECIMAL(12,2) NOT NULL,          -- unit_price * quantity
   CONSTRAINT fk_order_item_order   FOREIGN KEY (order_id)   REFERENCES orders(id)   ON DELETE CASCADE,
-  CONSTRAINT fk_order_item_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_order_item_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
   INDEX idx_order_items_order (order_id)
 ) ENGINE=InnoDB;
 
@@ -209,12 +211,23 @@ CREATE TABLE IF NOT EXISTS admin_users (
   id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name          VARCHAR(200) NOT NULL,
   email         VARCHAR(200) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,           -- bcrypt hash
+  pin_hash      VARCHAR(255) NOT NULL,           -- SHA-256 hash of PIN
   role          ENUM('super_admin','admin','staff') NOT NULL DEFAULT 'staff',
   is_active     TINYINT(1) NOT NULL DEFAULT 1,
   last_login_at DATETIME DEFAULT NULL,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- Tabel: admin_sessions (Sesi Login Admin)
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  admin_id    INT UNSIGNED NOT NULL,
+  token       VARCHAR(255) NOT NULL UNIQUE,
+  expires_at  DATETIME NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_session_admin FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE,
+  INDEX idx_session_token (token)
 ) ENGINE=InnoDB;
 
 -- ============================================================
@@ -267,7 +280,20 @@ INSERT INTO addons (name, description, price, badge, sort_order) VALUES
    'Sendok dan garpu tebal ramah lingkungan dilengkapi tisu basah steril.',
    3000, 'Eco-Friendly', 3);
 
--- Seed: Admin User (password: "admin123" — ganti setelah deploy!)
-INSERT INTO admin_users (name, email, password_hash, role) VALUES
+-- Seed: Admin User (PIN default: "123456")
+INSERT INTO admin_users (name, email, pin_hash, role) VALUES
   ('Super Admin', 'admin@mamahhemat.com',
-   '$2b$12$PLACEHOLDER_HASH_GANTI_DENGAN_BCRYPT_ADMIN123', 'super_admin');
+   '2e59a0b29bb68954e3f4c28b37000f4858bb53f148afb7b573634f9b9926b0d8', 'super_admin');
+
+-- Tabel: settings (Pengaturan Aplikasi)
+CREATE TABLE IF NOT EXISTS settings (
+  setting_key   VARCHAR(100) PRIMARY KEY,
+  setting_value TEXT NOT NULL,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+INSERT INTO settings (setting_key, setting_value) VALUES
+  ('admin_whatsapp', '6281290840140')
+ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+
+SET FOREIGN_KEY_CHECKS = 1;

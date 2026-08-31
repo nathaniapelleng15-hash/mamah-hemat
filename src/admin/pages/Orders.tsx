@@ -102,6 +102,12 @@ export default function Orders() {
     try {
       setLoadError(null);
       const res = await fetch('/api/orders', { headers: getAuthHeaders() });
+      if (res.status === 401) {
+        localStorage.removeItem('mh_admin_token');
+        localStorage.removeItem('mh_admin_expiry');
+        window.location.href = '/admin';
+        return;
+      }
       if (!res.ok) throw new Error('Gagal memuat data pesanan dari server.');
       const data = await res.json();
       setOrders(data.orders || []);

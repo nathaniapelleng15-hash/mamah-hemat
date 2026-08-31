@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Shield, History, CheckCircle2, AlertCircle, Delete,
   MapPin, Plus, Pencil, Trash2, Check, X, Eye, EyeOff,
-  RefreshCw, Truck
+  RefreshCw, Truck, Phone
 } from 'lucide-react';
 import { hashPin, getStoredPin, savePin } from '../pinUtils';
 import { formatIDR } from '../data';
@@ -24,6 +24,128 @@ const getAuthHeaders = () => {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 };
+
+// ── Sub-component: Nomor WhatsApp Admin ───────────────────
+function WhatsAppSection() {
+  const [phone, setPhone] = useState('');
+  const [originalPhone, setOriginalPhone] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/settings', { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('Gagal memuat pengaturan.');
+      const data = await res.json();
+      const wa = data.settings?.admin_whatsapp || '';
+      // Format display: hapus awalan 62, ganti dengan 0
+      const display = wa.startsWith('62') ? '0' + wa.slice(2) : wa;
+      setPhone(display);
+      setOriginalPhone(display);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchSettings(); }, [fetchSettings]);
+
+  const handleSave = async () => {
+    if (!phone.trim()) {
+      setMessage({ type: 'error', text: 'Nomor WhatsApp wajib diisi.' });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ admin_whatsapp: phone.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal menyimpan.');
+      const wa = data.settings?.admin_whatsapp || '';
+      const display = wa.startsWith('62') ? '0' + wa.slice(2) : wa;
+      setPhone(display);
+      setOriginalPhone(display);
+      setMessage({ type: 'success', text: 'Nomor WhatsApp admin berhasil diperbarui!' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasChanged = phone !== originalPhone;
+
+  return (
+    <div className="bg-neutral-900/50 border border-neutral-800/60 rounded-2xl overflow-hidden">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-neutral-800/60">
+        <div className="w-8 h-8 rounded-xl bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center">
+          <Phone className="w-4 h-4 text-emerald-400" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-white">Nomor WhatsApp Admin / CS</p>
+          <p className="text-xs text-neutral-500">Nomor ini ditampilkan di tombol "Hubungi CS" pada halaman pelanggan</p>
+        </div>
+      </div>
+
+      <div className="px-5 py-4 space-y-3">
+        {message && (
+          <div className={`flex items-center gap-2.5 px-4 py-3 rounded-xl text-sm ${message.type === 'success'
+              ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+              : 'bg-red-500/10 border border-red-500/20 text-red-400'
+            }`}>
+            {message.type === 'success'
+              ? <CheckCircle2 className="w-4 h-4 shrink-0" />
+              : <AlertCircle className="w-4 h-4 shrink-0" />
+            }
+            {message.text}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center py-6 text-neutral-600">
+            <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+            <span className="text-sm">Memuat...</span>
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+              <input
+                type="tel"
+                placeholder="contoh: 081290840140"
+                value={phone}
+                onChange={e => { setPhone(e.target.value); setMessage(null); }}
+                className="w-full bg-neutral-800/60 border border-neutral-700/60 rounded-xl pl-10 pr-3 py-2.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-[#E4C670]/40 transition-colors"
+              />
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={saving || !hasChanged}
+              className="flex items-center justify-center gap-1.5 text-xs font-semibold bg-[#E4C670] text-black px-5 py-2.5 rounded-xl hover:bg-[#E4C670]/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            >
+              {saving ? (
+                <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Menyimpan...</>
+              ) : (
+                <><Check className="w-3.5 h-3.5" /> Simpan</>
+              )}
+            </button>
+          </div>
+        )}
+
+        <p className="text-[10px] text-neutral-600">
+          Format: 08xx atau 628xx. Nomor ini digunakan di link WhatsApp untuk pelanggan menghubungi CS.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 // ── Sub-component: Section Area Pengantaran & Ongkir ─────
 function DeliveryAreasSection() {
@@ -511,6 +633,9 @@ export default function Settings() {
         <h1 className="text-xl font-bold text-white">Pengaturan</h1>
         <p className="text-sm text-neutral-500 mt-0.5">Keamanan akun, area pengantaran, dan riwayat aktivitas</p>
       </div>
+
+      {/* ── Section: Nomor WhatsApp Admin ── */}
+      <WhatsAppSection />
 
       {/* ── Section: Area Pengantaran & Ongkir ── */}
       <DeliveryAreasSection />
