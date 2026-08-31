@@ -6,6 +6,14 @@ const { sendWhatsappReceipt } = require("../services/whatsapp");
 require("dotenv").config();
 
 /**
+ * GET /api/webhook/midtrans
+ * Endpoint tambahan untuk pengujian / test webhook dari dashboard Midtrans
+ */
+router.get("/midtrans", (req, res) => {
+  res.status(200).send("OK - Midtrans Webhook Receiver is Active");
+});
+
+/**
  * POST /api/webhook/midtrans
  */
 router.post("/midtrans", async (req, res) => {
@@ -22,6 +30,15 @@ router.post("/midtrans", async (req, res) => {
   if (!order_id) {
     return res.status(400).json({
       error: "order_id tidak ditemukan.",
+    });
+  }
+
+  // Jika ini adalah test notification dari dashboard Midtrans, langsung kembalikan 200 OK
+  if (order_id.startsWith("payment_notif_test")) {
+    console.log(`[WEBHOOK] Test notification received: ${order_id}`);
+    return res.status(200).json({
+      success: true,
+      message: "Test notification received successfully",
     });
   }
 

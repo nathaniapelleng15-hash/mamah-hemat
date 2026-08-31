@@ -233,13 +233,14 @@ router.post('/reserve', async (req, res) => {
     // ── STEP 6: Buat transaksi + generate QRIS (mock atau Midtrans) ───────
     // Dilakukan di luar transaction block agar network latency dari API Midtrans tidak menahan lock database.
     const txNumber = `TXN-${orderNumber}`;
-    let qrisPayload, midtransTransactionId;
+    let qrisPayload, midtransTransactionId, qrCodeUrl;
 
     try {
       if (MOCK_MODE) {
         // MODE MOCK: Generate QR string palsu untuk testing lokal tanpa Midtrans
         qrisPayload = generateMockQris(orderNumber, grandTotal);
         midtransTransactionId = `MOCK-${orderNumber}`;
+        qrCodeUrl = '';
       } else {
         // MODE MIDTRANS: Panggil Core API sungguhan (charge QRIS)
         const midtransResult = await callMidtransQrisCharge({
@@ -249,6 +250,7 @@ router.post('/reserve', async (req, res) => {
           expiryMinutes: TTL_MINUTES,
         });
         qrisPayload = midtransResult.qr_string;
+        qrCodeUrl = midtransResult.qr_code_url;
         midtransTransactionId = midtransResult.transaction_id;
       }
 
@@ -306,6 +308,7 @@ router.post('/reserve', async (req, res) => {
       transactionNumber: txNumber,
       grandTotal,
       qrisPayload,           // string QR code untuk ditampilkan di frontend
+      qrCodeUrl,             // URL QR code asli untuk simulator Midtrans
       midtransTransactionId,
       expiresAt: expiresAt.toISOString(),
       ttlMinutes: TTL_MINUTES,
@@ -448,8 +451,13 @@ async function callMidtransQrisCharge({ orderId, grossAmount, customer, expiryMi
     || data.actions?.find(a => a.name === 'generate-qr-code')?.url
     || '';
 
+  const qrCodeUrl = data.actions?.find(a => a.name === 'generate-qr-code-v2')?.url
+    || data.actions?.find(a => a.name === 'generate-qr-code')?.url
+    || '';
+
   return {
     qr_string: qrString,
+    qr_code_url: qrCodeUrl,
     transaction_id: data.transaction_id,
     raw: data,
   };
